@@ -53,6 +53,7 @@
 int sysctl_panic_on_oom;
 int sysctl_oom_kill_allocating_task;
 int sysctl_oom_dump_tasks = 1;
+int sysctl_reap_mem_on_sigkill;
 
 DEFINE_MUTEX(oom_lock);
 /* Serializes oom_score_adj and oom_score_adj_min updates */
@@ -606,6 +607,13 @@ void wake_oom_reaper(struct task_struct *tsk)
 	if (!oom_reaper_th)
 		return;
 
+	/*
+	 * Move the lock here to avoid scenario of queuing
+	 * the same task by both OOM killer and any other SIGKILL
+	 * path.
+	 */
+	spin_lock(&oom_reaper_lock);
+
 	/* mm is already queued? */
 	if (test_and_set_bit(MMF_OOM_REAP_QUEUED, &tsk->signal->oom_mm->flags))
 		return;
@@ -637,6 +645,16 @@ static inline void wake_oom_reaper(struct task_struct *tsk)
 }
 #endif /* CONFIG_MMU */
 
+static void __mark_oom_victim(struct task_struct *tsk)
+{
+	struct mm_struct *mm = tsk->mm;
+
+	if (!cmpxchg(&tsk->signal->oom_mm, NULL, mm)) {
+		atomic_inc(&tsk->signal->oom_mm->mm_count);
+		set_bit(MMF_OOM_VICTIM, &mm->flags);
+	}
+}
+
 /**
  * mark_oom_victim - mark the given task as OOM victim
  * @tsk: task to mark
@@ -649,18 +667,20 @@ static inline void wake_oom_reaper(struct task_struct *tsk)
  */
 static void mark_oom_victim(struct task_struct *tsk)
 {
-	struct mm_struct *mm = tsk->mm;
-
 	WARN_ON(oom_killer_disabled);
 	/* OOM killer might race with memcg OOM */
 	if (test_and_set_tsk_thread_flag(tsk, TIF_MEMDIE))
 		return;
 
 	/* oom_mm is bound to the signal struct life time. */
+<<<<<<< HEAD
 	if (!cmpxchg(&tsk->signal->oom_mm, NULL, mm)) {
 		mmgrab(tsk->signal->oom_mm);
 		set_bit(MMF_OOM_VICTIM, &mm->flags);
 	}
+=======
+	__mark_oom_victim(tsk);
+>>>>>>> 3f8204737580... mm: oom_kill: reap memory of a task that receives SIGKILL
 
 	/*
 	 * Make sure that the task is woken up from uninterruptible sleep
@@ -1101,4 +1121,23 @@ void pagefault_out_of_memory(void)
 		return;
 	out_of_memory(&oc);
 	mutex_unlock(&oom_lock);
+}
+
+void add_to_oom_reaper(struct task_struct *p)
+	__releases(p->alloc_lock)
+{
+	if (!sysctl_reap_mem_on_sigkill)
+		return;
+
+	p = find_lock_task_mm(p);
+	if (!p)
+		return;
+
+	get_task_struct(p);
+	if (task_will_free_mem(p)) {
+		__mark_oom_victim(p);
+		wake_oom_reaper(p);
+	}
+	task_unlock(p);
+	put_task_struct(p);
 }
