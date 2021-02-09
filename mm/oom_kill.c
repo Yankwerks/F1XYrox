@@ -673,14 +673,7 @@ static void mark_oom_victim(struct task_struct *tsk)
 		return;
 
 	/* oom_mm is bound to the signal struct life time. */
-<<<<<<< HEAD
-	if (!cmpxchg(&tsk->signal->oom_mm, NULL, mm)) {
-		mmgrab(tsk->signal->oom_mm);
-		set_bit(MMF_OOM_VICTIM, &mm->flags);
-	}
-=======
 	__mark_oom_victim(tsk);
->>>>>>> 3f8204737580... mm: oom_kill: reap memory of a task that receives SIGKILL
 
 	/*
 	 * Make sure that the task is woken up from uninterruptible sleep
