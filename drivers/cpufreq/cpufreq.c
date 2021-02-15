@@ -730,8 +730,6 @@ static ssize_t store_##file_name					\
 	if (&policy->object == &policy->min &&				\
 	    task_is_booster(current))					\
 		return count;						\
-	if (&policy->object == &policy->max)				\
-		return count;						\
 									\
 	memcpy(&new_policy, policy, sizeof(*policy));			\
 	new_policy.min = policy->user_policy.min;			\
@@ -2273,6 +2271,9 @@ static int cpufreq_set_policy(struct cpufreq_policy *policy,
 	/* adjust if necessary - hardware incompatibility */
 	blocking_notifier_call_chain(&cpufreq_policy_notifier_list,
 			CPUFREQ_INCOMPATIBLE, new_policy);
+
+        blocking_notifier_call_chain(&cpufreq_policy_notifier_list,
+			CPUFREQ_THERMAL, new_policy);
 
 	/*
 	 * verify the cpu speed can be set within this limit, which might be
